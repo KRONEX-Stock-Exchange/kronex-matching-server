@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+    Account,
     Order,
     OrderStatus,
     OrderType,
@@ -80,9 +81,11 @@ export class OrderExecutionService {
         }
     }
 
-    async processSubmitOrder(tx: PrismaClient, submitOrder: Order) {
+    async processSubmitOrder(tx: PrismaClient, submitOrder: Order, lockedBalance?: bigint) {
         const stockId = submitOrder.stockId;
         const tradingType = submitOrder.tradingType;
+
+        let totalExecutedAmount = 0n;
 
         let nextStockPrice: bigint;
         let createMatchList = [];
@@ -98,8 +101,8 @@ export class OrderExecutionService {
         let userStocks = new Map<number, UserStock>(); // accountId, userStocks 객체
 
         // 메모리에 주문 계좌의 주식 보유 현황 저장
-        if (!userStocks.get(submitOrder.accountId)) {
-            const result = await tx.$queryRaw<UserStock[]>`
+        // 주식 보유 레코드 락
+        const rs = await tx.$queryRaw<UserStock[]>`
                 SELECT account_id AS accountId, stock_id AS stockId,
                        number, can_number AS canNumber, average,
                        total_buy_amount AS totalBuyAmount
@@ -108,14 +111,12 @@ export class OrderExecutionService {
                 FOR UPDATE
             `;
 
-            userStocks.set(submitOrder.accountId, result[0] ?? null);
-        }
+        userStocks.set(submitOrder.accountId, rs[0] ?? null);
 
         while (true) {
             // 체결할 주문 찾기
             let findOrder = await this.findOrder(tx, submitOrder, tradingType);
 
-            // 체결할 주문이 있다면
             if (findOrder) {
                 updatedOrders.push({
                     id: findOrder.id,
@@ -143,19 +144,22 @@ export class OrderExecutionService {
                 // 체결
                 if (submitRemaining === findRemaining) {
                     const order = [findOrder, submitOrder];
+                    let executedAmount = 0n;
 
-                    [userStockList, userStocks] = await this.handleMatchService.handleEqualMatch(
-                        tx,
-                        submitOrder,
-                        findOrder,
-                        tradingType,
-                        submitRemaining,
-                        findRemaining,
-                        userStockList,
-                        userStocks,
-                    );
+                    [userStockList, userStocks, executedAmount] =
+                        await this.handleMatchService.handleEqualMatch(
+                            tx,
+                            submitOrder,
+                            findOrder,
+                            tradingType,
+                            submitRemaining,
+                            findRemaining,
+                            userStockList,
+                            userStocks,
+                        );
 
                     await this.orderUtilService.orderCompleteUpdate(tx, order);
+
                     createMatchList.push(
                         this.orderUtilService.createOrderMatch(
                             submitOrder,
@@ -164,13 +168,17 @@ export class OrderExecutionService {
                             findRemaining,
                         ),
                     );
+
+                    submitOrder.matchNumber = submitOrder.number;
                     nextStockPrice = findOrder.price;
+                    totalExecutedAmount += executedAmount;
 
                     break;
                 } else if (submitRemaining < findRemaining) {
                     const order = [submitOrder];
+                    let executedAmount = 0n;
 
-                    [userStockList, userStocks] =
+                    [userStockList, userStocks, executedAmount] =
                         await this.handleMatchService.handleRemainingMatch(
                             tx,
                             submitOrder,
@@ -182,6 +190,7 @@ export class OrderExecutionService {
                         );
 
                     await this.orderUtilService.orderCompleteUpdate(tx, order, submitOrder.number);
+
                     await this.orderUtilService.orderMatchAndRemainderUpdate(
                         tx,
                         findOrder,
@@ -196,19 +205,24 @@ export class OrderExecutionService {
                         ),
                     );
 
+                    submitOrder.matchNumber = submitOrder.number;
                     nextStockPrice = findOrder.price;
+                    totalExecutedAmount += executedAmount;
 
                     break;
                 } else if (submitRemaining > findRemaining) {
-                    [userStockList, userStocks] = await this.handleMatchService.handlePartialMatch(
-                        tx,
-                        submitOrder,
-                        findOrder,
-                        tradingType,
-                        findRemaining,
-                        userStockList,
-                        userStocks,
-                    );
+                    let executedAmount = 0n;
+
+                    [userStockList, userStocks, executedAmount] =
+                        await this.handleMatchService.handlePartialMatch(
+                            tx,
+                            submitOrder,
+                            findOrder,
+                            tradingType,
+                            findRemaining,
+                            userStockList,
+                            userStocks,
+                        );
 
                     createMatchList.push(
                         this.orderUtilService.createOrderMatch(
@@ -219,6 +233,7 @@ export class OrderExecutionService {
                         ),
                     );
                     nextStockPrice = findOrder.price;
+                    totalExecutedAmount += executedAmount;
 
                     submitOrder.matchNumber =
                         submitOrder.matchNumber + (findOrder.number - findOrder.matchNumber);
@@ -230,6 +245,7 @@ export class OrderExecutionService {
                 if (!nextStockPrice) {
                     const stock = await tx.stock.findUnique({
                         where: { id: stockId },
+                        select: { price: true },
                     });
 
                     nextStockPrice = stock.price;
@@ -240,6 +256,7 @@ export class OrderExecutionService {
                     submitOrder.number !== submitOrder.matchNumber &&
                     submitOrder.orderType == OrderType.market
                 ) {
+                    // 주문 취소 처리
                     await tx.order.update({
                         where: { id: submitOrder.id },
                         data: {
@@ -247,6 +264,7 @@ export class OrderExecutionService {
                         },
                     });
 
+                    // 미체결 수량 환불
                     if (submitOrder.tradingType === TradingType.sell) {
                         await tx.userStock.update({
                             where: {
@@ -261,11 +279,60 @@ export class OrderExecutionService {
                                 },
                             },
                         });
+                    } else if (submitOrder.tradingType === TradingType.buy) {
+                        await tx.account.update({
+                            where: {
+                                id: submitOrder.accountId,
+                            },
+                            data: {
+                                canMoney: {
+                                    increment: lockedBalance - totalExecutedAmount,
+                                },
+                            },
+                        });
                     }
+                } else if (
+                    // 비싼 가격에 지정가 매수 주문을 한 경우 (부분 체결)
+                    submitOrder.number !== submitOrder.matchNumber &&
+                    submitOrder.orderType == OrderType.limit &&
+                    tradingType === TradingType.buy
+                ) {
+                    await tx.account.update({
+                        where: {
+                            id: submitOrder.accountId,
+                        },
+                        data: {
+                            canMoney: {
+                                increment:
+                                    lockedBalance -
+                                    (totalExecutedAmount +
+                                        submitOrder.price *
+                                            (submitOrder.number - submitOrder.matchNumber)),
+                            },
+                        },
+                    });
                 }
-
                 break;
             }
+        }
+
+        // 비싼 가격에 지정가 매수 주문을 한 경우 (완전 체결)
+        // 잠근 금액과 실 체결 금액이 다른경우 환불
+        if (
+            tradingType === TradingType.buy &&
+            lockedBalance !== totalExecutedAmount &&
+            submitOrder.matchNumber === submitOrder.number
+        ) {
+            await tx.account.update({
+                where: {
+                    id: submitOrder.accountId,
+                },
+                data: {
+                    canMoney: {
+                        increment: lockedBalance - totalExecutedAmount,
+                    },
+                },
+            });
         }
 
         // 후처리

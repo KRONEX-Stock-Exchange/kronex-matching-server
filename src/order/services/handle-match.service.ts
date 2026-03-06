@@ -16,13 +16,15 @@ export class HandleMatchService {
         findOrderNumber: bigint,
         userStockList: { update: number[] },
         userStocks: Map<number, UserStock>,
-    ): Promise<[{ update: number[] }, Map<number, UserStock>]> {
+    ): Promise<[{ update: number[] }, Map<number, UserStock>, bigint]> {
         const increaseNumber = submitOrderNumber;
         const decreaseNumber = findOrderNumber;
 
         const stockId = submitOrder.stockId;
         const submitOrderAccountId = submitOrder.accountId;
         const findOrderAccountId = findOrder.accountId;
+
+        const executedAmount = increaseNumber * findOrder.price;
 
         // 잔고 수정
         if (tradingType === TradingType.buy) {
@@ -43,6 +45,7 @@ export class HandleMatchService {
                 decreaseNumber,
                 userStockList,
                 userStocks,
+                findOrder.price,
             );
         } else {
             [userStockList, userStocks] = await this.orderUtilService.userStockDecrease(
@@ -52,6 +55,7 @@ export class HandleMatchService {
                 decreaseNumber,
                 userStockList,
                 userStocks,
+                findOrder.price,
             );
 
             [userStockList, userStocks] = await this.orderUtilService.userStockIncrease(
@@ -65,7 +69,7 @@ export class HandleMatchService {
             );
         }
 
-        return [userStockList, userStocks];
+        return [userStockList, userStocks, executedAmount];
     }
 
     // submit < find
@@ -77,13 +81,15 @@ export class HandleMatchService {
         submitOrderNumber: bigint,
         userStockList: { update: number[] },
         userStocks: Map<number, UserStock>,
-    ): Promise<[{ update: number[] }, Map<number, UserStock>]> {
+    ): Promise<[{ update: number[] }, Map<number, UserStock>, bigint]> {
         const increaseNumber = submitOrderNumber;
         const decreaseNumber = submitOrderNumber;
 
         const stockId = submitOrder.stockId;
         const submitOrderAccountId = submitOrder.accountId;
         const findOrderAccountId = findOrder.accountId;
+
+        const executedAmount = increaseNumber * findOrder.price;
 
         // 잔고 수정
         if (tradingType === TradingType.buy) {
@@ -104,6 +110,7 @@ export class HandleMatchService {
                 decreaseNumber,
                 userStockList,
                 userStocks,
+                findOrder.price,
             );
         } else {
             [userStockList, userStocks] = await this.orderUtilService.userStockDecrease(
@@ -113,6 +120,7 @@ export class HandleMatchService {
                 decreaseNumber,
                 userStockList,
                 userStocks,
+                findOrder.price,
             );
 
             [userStockList, userStocks] = await this.orderUtilService.userStockIncrease(
@@ -126,7 +134,7 @@ export class HandleMatchService {
             );
         }
 
-        return [userStockList, userStocks];
+        return [userStockList, userStocks, executedAmount];
     }
 
     // submit > find
@@ -138,7 +146,7 @@ export class HandleMatchService {
         findOrderNumber: bigint,
         userStockList: { update: number[] },
         userStocks: Map<number, UserStock>,
-    ): Promise<[{ update: number[] }, Map<number, UserStock>]> {
+    ): Promise<[{ update: number[] }, Map<number, UserStock>, bigint]> {
         const order = [findOrder];
         const increaseNumber = findOrderNumber;
         const decreaseNumber = findOrderNumber;
@@ -146,6 +154,8 @@ export class HandleMatchService {
         const stockId = submitOrder.stockId;
         const submitOrderAccountId = submitOrder.accountId;
         const findOrderAccountId = findOrder.accountId;
+
+        const executedAmount = increaseNumber * findOrder.price;
 
         // 잔고 수정
         if (tradingType === TradingType.buy) {
@@ -166,6 +176,7 @@ export class HandleMatchService {
                 decreaseNumber,
                 userStockList,
                 userStocks,
+                findOrder.price,
             );
         } else {
             [userStockList, userStocks] = await this.orderUtilService.userStockDecrease(
@@ -175,6 +186,7 @@ export class HandleMatchService {
                 decreaseNumber,
                 userStockList,
                 userStocks,
+                findOrder.price,
             );
 
             [userStockList, userStocks] = await this.orderUtilService.userStockIncrease(
@@ -191,6 +203,6 @@ export class HandleMatchService {
         await this.orderUtilService.orderCompleteUpdate(prisma, order, findOrder.number);
         await this.orderUtilService.orderMatchAndRemainderUpdate(prisma, submitOrder, findOrder);
 
-        return [userStockList, userStocks];
+        return [userStockList, userStocks, executedAmount];
     }
 }

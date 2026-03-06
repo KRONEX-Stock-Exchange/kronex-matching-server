@@ -40,12 +40,6 @@ export class OrderService {
 
         try {
             await this.prismaService.$transaction(async (tx: PrismaClient) => {
-                // null 오류 추적용
-                if (!account || !account?.id) {
-                    console.log(data);
-                    console.log(tradingType);
-                    console.log(account);
-                }
                 const accountId = account.id;
 
                 // 시장가 주문일 경우 0원으로 통일
@@ -64,34 +58,46 @@ export class OrderService {
                 });
 
                 // 체결 가능 주문 탐색
-                updatedOrders = await this.orderExecutionService.processSubmitOrder(
-                    tx,
-                    submitOrder,
-                );
+                if (tradingType === TradingType.buy) {
+                    updatedOrders = await this.orderExecutionService.processSubmitOrder(
+                        tx,
+                        submitOrder,
+                        BigInt((data as BuyOrder).lockedBalance),
+                    );
+                } else {
+                    updatedOrders = await this.orderExecutionService.processSubmitOrder(
+                        tx,
+                        submitOrder,
+                    );
+                }
             });
         } catch (err) {
             console.error(err);
 
-            // 가능 수량 환불
+            // 오류시 가능 수량 잠금 해제
             if (tradingType === TradingType.sell) {
-                await this.prismaService.$transaction(async (tx: PrismaClient) => {
-                    await tx.$queryRaw`
-                    SELECT can_number FROM user_stocks 
-                    WHERE account_id = ${account.id} AND stock_id = ${data.stockId}
-                    FOR UPDATE
-                    `;
-
-                    await tx.userStock.update({
-                        where: {
-                            accountId_stockId: {
-                                accountId: account.id,
-                                stockId: data.stockId,
-                            },
+                await this.prismaService.userStock.update({
+                    where: {
+                        accountId_stockId: {
+                            accountId: account.id,
+                            stockId: data.stockId,
                         },
-                        data: {
-                            canNumber: { increment: data.number },
+                    },
+                    data: {
+                        canNumber: { increment: data.number },
+                    },
+                });
+            } else {
+                // 오류시 매수 가능 예수금 잠금 해제
+                await this.prismaService.account.update({
+                    where: {
+                        id: account.id,
+                    },
+                    data: {
+                        canMoney: {
+                            increment: (data as BuyOrder).lockedBalance,
                         },
-                    });
+                    },
                 });
             }
         }

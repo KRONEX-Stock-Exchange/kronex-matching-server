@@ -1,12 +1,41 @@
 import { Injectable } from '@nestjs/common';
 import { Order, OrderStatus, PrismaClient, UserStock } from '@prisma/client';
 import { getKstDate, getKstTimeNow } from '../utils/get-kst-date';
+import { StockLimitService } from './stock-limit.service';
 
 @Injectable()
 export class OrderUtilService {
+    constructor(private stockLimitService: StockLimitService) {}
+
     // 체결 가능한 수량 계산
     getRemaining(order: Order) {
-        return order.number - order.matchNumber;
+        return order.number - (order.matchNumber ?? 0n);
+    }
+
+    async accountMoneyIncrease(tx: PrismaClient, accountId: number, amount: bigint) {
+        await tx.account.update({
+            where: {
+                id: accountId,
+            },
+            data: {
+                money: {
+                    increment: amount,
+                },
+            },
+        });
+    }
+
+    async accountMoneyDecrease(tx: PrismaClient, accountId: number, amount: bigint) {
+        await tx.account.update({
+            where: {
+                id: accountId,
+            },
+            data: {
+                money: {
+                    decrement: amount,
+                },
+            },
+        });
     }
 
     // 가진 주식의 수를 증가
@@ -20,6 +49,8 @@ export class OrderUtilService {
         buyPrice: bigint,
     ): Promise<[{ update: number[] }, Map<number, UserStock>]> {
         const userStock = userStocks.get(accountId);
+
+        await this.accountMoneyDecrease(tx, accountId, increaseNumber * buyPrice);
 
         // 첫 매수
         if (!userStock) {
@@ -61,8 +92,11 @@ export class OrderUtilService {
         decreaseNumber: bigint,
         userStockList: { update: number[] },
         userStocks: Map<number, UserStock>,
+        sellPrice: bigint,
     ): Promise<[{ update: number[] }, Map<number, UserStock>]> {
         const userStock = userStocks.get(accountId);
+
+        await this.accountMoneyIncrease(tx, accountId, decreaseNumber * sellPrice);
 
         // 더 이상 보유 수량이 없을때
         if (userStock.number - decreaseNumber === 0n) {
@@ -145,6 +179,8 @@ export class OrderUtilService {
             },
         });
 
+        const limits = await this.stockLimitService.getStockLimit(stockId);
+
         // 당일 날짜 조회 및 당일 가격 정보 조회
         const today = getKstDate(0);
         const stockHistory = await tx.stockHistory.upsert({
@@ -161,6 +197,8 @@ export class OrderUtilService {
                 high: updatePrice,
                 close: updatePrice,
                 open: updatePrice,
+                upperLimit: limits.upperLimit,
+                lowerLimit: limits.lowerLimit,
             },
             update: {
                 close: updatePrice,

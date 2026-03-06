@@ -30,9 +30,20 @@ model User {
   email     String   @unique @db.VarChar(50)
   createdAt DateTime @default(now()) @map("created_at")
 
-  account Account[]
+  account       Account[]
+  refreshTokens refreshToken[]
 
   @@map("users")
+}
+
+model refreshToken {
+  id          Int    @id @default(autoincrement())
+  userId      Int    @map("user_id")
+  hashedToken String @map("hashed_token")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("refresh_tokens")
 }
 
 model Account {
@@ -40,6 +51,7 @@ model Account {
   userId        Int      @map("user_id")
   accountNumber Int      @unique @map("account_number")
   money         BigInt
+  canMoney      BigInt   @map("can_money")
   createdAt     DateTime @default(now()) @map("created_at")
 
   userStocks UserStock[] @relation("UserStocksToAccounts")
@@ -65,12 +77,14 @@ model Stock {
 }
 
 model StockHistory {
-  stockId Int      @map("stock_id")
-  date    DateTime @db.Date
-  high    BigInt
-  low     BigInt
-  close   BigInt
-  open    BigInt
+  stockId    Int      @map("stock_id")
+  date       DateTime @db.Date
+  high       BigInt
+  low        BigInt
+  close      BigInt
+  open       BigInt
+  upperLimit BigInt   @map("upper_limit")
+  lowerLimit BigInt   @map("lower_limit")
 
   stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
 
@@ -84,7 +98,7 @@ model UserStock {
   number         BigInt
   canNumber      BigInt @map("can_number")
   average        BigInt
-  totalBuyAmount BigInt @default(0) @map("total_buy_amount")
+  totalBuyAmount BigInt @map("total_buy_amount")
 
   accounts Account @relation("UserStocksToAccounts", fields: [accountId], references: [id])
   stocks   Stock   @relation("UserStocksToStocks", fields: [stockId], references: [id])
@@ -99,7 +113,7 @@ model Order {
   stockId     Int          @map("stock_id")
   price       BigInt
   number      BigInt
-  matchNumber BigInt?      @default(0) @map("match_number")
+  matchNumber BigInt       @map("match_number")
   orderType   OrderType    @map("order_type")
   status      OrderStatus? @default(n)
   tradingType TradingType  @map("trading_type")
