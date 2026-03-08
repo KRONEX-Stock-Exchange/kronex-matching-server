@@ -21,6 +21,9 @@ export class OrderUtilService {
                 money: {
                     increment: amount,
                 },
+                canMoney: {
+                    increment: amount,
+                },
             },
         });
     }

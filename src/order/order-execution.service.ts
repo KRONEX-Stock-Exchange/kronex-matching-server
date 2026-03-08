@@ -49,7 +49,7 @@ export class OrderExecutionService {
               ${priceFilter}
             ORDER BY price ${priceOrder}, created_at ASC
             LIMIT 1
-            FOR UPDATE SKIP LOCKED
+            FOR UPDATE
         `);
 
         return result[0] ?? null;
