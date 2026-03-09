@@ -52,6 +52,7 @@ export class OrderService {
                         stockId: data.stockId,
                         price: data.price,
                         number: data.number,
+                        matchNumber: 0n,
                         orderType: data.orderType,
                         tradingType: tradingType,
                     },
