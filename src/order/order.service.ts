@@ -9,6 +9,7 @@ import { EditOrder } from './type/edit.type';
 import { SellOrder } from './type/sell.type';
 import { ClientProxy } from '@nestjs/microservices';
 
+// @TODO UpdateOrders를 값을 바로 전달해주기
 @Injectable()
 export class OrderService {
     constructor(
@@ -113,8 +114,24 @@ export class OrderService {
     async edit(data: EditOrder) {
         let order: Order;
         let updatedOrders: { id: number; accountId: number }[] = [];
+        let isAlreadyProcessed = false;
 
         await this.prismaService.$transaction(async (tx: PrismaClient) => {
+            // 주문 락
+            const [lockedOrder] = await tx.$queryRaw<Order[]>`
+                SELECT
+                    status
+                FROM orders
+                WHERE id = ${data.orderId}
+                FOR UPDATE
+            `;
+
+            // 중복 체결 방지
+            if (lockedOrder.status !== OrderStatus.n) {
+                isAlreadyProcessed = true;
+                return;
+            }
+
             order = await tx.order.update({
                 data: {
                     price: data.price,
@@ -124,8 +141,21 @@ export class OrderService {
                 },
             });
 
-            updatedOrders = await this.orderExecutionService.processSubmitOrder(tx, order);
+            const lockedBalance = (order.number - order.matchNumber) * order.price;
+
+            updatedOrders = await this.orderExecutionService.processSubmitOrder(
+                tx,
+                order,
+                lockedBalance,
+            );
         });
+
+        if (isAlreadyProcessed) {
+            return this.client.emit('order.error', {
+                orderId: data.orderId,
+                key: 'ALREADY_PROCESSED_ORDER',
+            });
+        }
 
         this.client.emit('order.evented', {
             stockId: order.stockId,
@@ -136,8 +166,24 @@ export class OrderService {
     // 주문 취소
     async cancel(data: CancelOrder) {
         let order: Order;
+        let isAlreadyProcessed = false;
 
         await this.prismaService.$transaction(async (tx: PrismaClient) => {
+            // 주문 락
+            const [lockedOrder] = await tx.$queryRaw<Order[]>`
+                SELECT
+                    status
+                FROM orders
+                WHERE id = ${data.orderId}
+                FOR UPDATE
+            `;
+
+            // 중복 체결 방지
+            if (lockedOrder.status !== OrderStatus.n) {
+                isAlreadyProcessed = true;
+                return;
+            }
+
             order = await tx.order.update({
                 data: {
                     status: OrderStatus.c,
@@ -162,8 +208,26 @@ export class OrderService {
                         },
                     },
                 });
+            } else {
+                await tx.account.update({
+                    where: {
+                        id: order.accountId,
+                    },
+                    data: {
+                        canMoney: {
+                            increment: (order.number - order.matchNumber) * order.price,
+                        },
+                    },
+                });
             }
         });
+
+        if (isAlreadyProcessed) {
+            return this.client.emit('order.error', {
+                orderId: data.orderId,
+                key: 'ALREADY_PROCESSED_ORDER',
+            });
+        }
 
         this.client.emit('order.evented', {
             stockId: order.stockId,

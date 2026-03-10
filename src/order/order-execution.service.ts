@@ -302,6 +302,7 @@ export class OrderExecutionService {
                     }
                 } else if (
                     // 비싼 가격에 지정가 매수 주문을 한 경우 (부분 체결)
+                    submitOrder.matchNumber > 0n &&
                     submitOrder.number !== submitOrder.matchNumber &&
                     submitOrder.orderType == OrderType.limit &&
                     tradingType === TradingType.buy
