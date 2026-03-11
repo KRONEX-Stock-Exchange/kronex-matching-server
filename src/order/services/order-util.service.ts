@@ -186,6 +186,11 @@ export class OrderUtilService {
 
         // 당일 날짜 조회 및 당일 가격 정보 조회
         const today = getKstDate(0);
+        const existing = await tx.stockHistory.findUnique({
+            where: { stockId_date: { stockId, date: today } },
+            select: { open: true },
+        });
+
         const stockHistory = await tx.stockHistory.upsert({
             where: {
                 stockId_date: {
@@ -205,6 +210,7 @@ export class OrderUtilService {
             },
             update: {
                 close: updatePrice,
+                open: existing?.open ?? updatePrice,
             },
         });
 

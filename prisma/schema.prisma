@@ -82,7 +82,7 @@ model StockHistory {
   high       BigInt
   low        BigInt
   close      BigInt
-  open       BigInt
+  open       BigInt?
   upperLimit BigInt   @map("upper_limit")
   lowerLimit BigInt   @map("lower_limit")
 
