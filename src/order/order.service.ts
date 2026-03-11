@@ -8,8 +8,8 @@ import { CancelOrder } from './type/cancel.type';
 import { EditOrder } from './type/edit.type';
 import { SellOrder } from './type/sell.type';
 import { ClientProxy } from '@nestjs/microservices';
+import { orderSerializer } from './utils/order-serializer';
 
-// @TODO UpdateOrders를 값을 바로 전달해주기
 @Injectable()
 export class OrderService {
     constructor(
@@ -32,7 +32,7 @@ export class OrderService {
 
     // 매수, 매도
     async trade(data: BuyOrder | SellOrder, tradingType: TradingType) {
-        let updatedOrders: { id: number; accountId: number }[] = [];
+        let updatedOrders: Order[] = [];
 
         const account = await this.prismaService.account.findUnique({
             where: { accountNumber: data.accountNumber },
@@ -105,15 +105,16 @@ export class OrderService {
         }
 
         this.client.emit('order.evented', {
+            type: tradingType,
             stockId: data.stockId,
-            updatedOrders: updatedOrders,
+            updatedOrders: orderSerializer(updatedOrders),
         });
     }
 
     // 주문 정정
     async edit(data: EditOrder) {
         let order: Order;
-        let updatedOrders: { id: number; accountId: number }[] = [];
+        let updatedOrders: Order[] = [];
         let isAlreadyProcessed = false;
 
         await this.prismaService.$transaction(async (tx: PrismaClient) => {
@@ -158,13 +159,15 @@ export class OrderService {
         }
 
         this.client.emit('order.evented', {
+            type: 'edit',
             stockId: order.stockId,
-            updatedOrders: updatedOrders,
+            updatedOrders: orderSerializer(updatedOrders),
         });
     }
 
     // 주문 취소
     async cancel(data: CancelOrder) {
+        let orders: Order[] = [];
         let order: Order;
         let isAlreadyProcessed = false;
 
@@ -192,6 +195,7 @@ export class OrderService {
                     id: data.orderId,
                 },
             });
+            orders.push(order);
 
             // 매도 주문일 경우 가능수량 수정
             if (order.tradingType == 'sell') {
@@ -230,8 +234,9 @@ export class OrderService {
         }
 
         this.client.emit('order.evented', {
+            type: 'cancel',
             stockId: order.stockId,
-            updatedOrders: [{ id: order.id, accountId: order.accountId }],
+            updatedOrders: orderSerializer(orders),
         });
     }
 }
