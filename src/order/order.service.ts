@@ -105,7 +105,7 @@ export class OrderService {
             type: tradingType,
             stock: {
                 id: data.stockId,
-                nextPrice: rs.nextStockPrice,
+                nextPrice: Number(rs.nextStockPrice),
             },
             updatedOrders: orderSerializer(rs.updatedOrders),
         });
@@ -158,7 +158,7 @@ export class OrderService {
             type: 'edit',
             stock: {
                 id: order.stockId,
-                nextPrice: rs.nextStockPrice,
+                nextPrice: Number(rs.nextStockPrice),
             },
             updatedOrders: orderSerializer(rs.updatedOrders),
         });
@@ -166,7 +166,10 @@ export class OrderService {
 
     // 주문 취소
     async cancel(data: CancelOrder) {
-        let rs: { updatedOrders: Order[]; nextStockPrice: bigint };
+        let rs = {
+            updatedOrders: [],
+            nextStockPrice: 0n,
+        };
         let order: Order;
         let isAlreadyProcessed = false;
 
@@ -236,7 +239,7 @@ export class OrderService {
             type: 'cancel',
             stock: {
                 id: order.stockId,
-                nextPrice: rs.nextStockPrice,
+                nextPrice: Number(rs.nextStockPrice),
             },
             updatedOrders: orderSerializer(rs.updatedOrders),
         });
