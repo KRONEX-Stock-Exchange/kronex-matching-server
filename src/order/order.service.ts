@@ -39,39 +39,45 @@ export class OrderService {
             select: { id: true },
         });
 
+        if (!account) throw new Error(`Account not found: ${data.accountNumber}`);
+
         try {
-            await this.prismaService.$transaction(async (tx: PrismaClient) => {
-                const accountId = account.id;
+            await this.prismaService.$transaction(
+                async (tx: PrismaClient) => {
+                    const accountId = account.id;
 
-                // 시장가 주문일 경우 0원으로 통일
-                if (data.orderType == OrderType.market) data.price = 0n;
+                    // 시장가 주문일 경우 0원으로 통일
+                    if (data.orderType == OrderType.market) data.price = 0n;
 
-                // 주문 생성
-                const submitOrder = await tx.order.create({
-                    data: {
-                        accountId: accountId,
-                        stockId: data.stockId,
-                        price: data.price,
-                        number: data.number,
-                        matchNumber: 0n,
-                        orderType: data.orderType,
-                        tradingType: tradingType,
-                    },
-                });
+                    // 주문 생성
+                    const submitOrder = await tx.order.create({
+                        data: {
+                            accountId: accountId,
+                            stockId: data.stockId,
+                            price: data.price,
+                            number: data.number,
+                            matchNumber: 0n,
+                            orderType: data.orderType,
+                            tradingType: tradingType,
+                        },
+                    });
 
-                // 체결 가능 주문 탐색
-                if (tradingType === TradingType.buy) {
-                    rs = await this.orderExecutionService.processSubmitOrder(
-                        tx,
-                        submitOrder,
-                        BigInt((data as BuyOrder).lockedBalance),
-                    );
-                } else {
-                    rs = await this.orderExecutionService.processSubmitOrder(tx, submitOrder);
-                }
-            });
+                    // 체결 가능 주문 탐색
+                    if (tradingType === TradingType.buy) {
+                        rs = await this.orderExecutionService.processSubmitOrder(
+                            tx,
+                            submitOrder,
+                            BigInt((data as BuyOrder).lockedBalance),
+                        );
+                    } else {
+                        rs = await this.orderExecutionService.processSubmitOrder(tx, submitOrder);
+                    }
+                },
+                { timeout: 30000 },
+            );
         } catch (err) {
             console.error(err);
+            console.log(account);
 
             // 오류시 가능 수량 잠금 해제
             if (tradingType === TradingType.sell) {
@@ -99,6 +105,8 @@ export class OrderService {
                     },
                 });
             }
+
+            return;
         }
 
         this.client.emit('order.evented', {
@@ -112,6 +120,7 @@ export class OrderService {
     }
 
     // 주문 정정
+    // @TODO 에러처리 해야됨
     async edit(data: EditOrder) {
         let rs: { updatedOrders: Order[]; nextStockPrice: bigint };
         let order: Order;

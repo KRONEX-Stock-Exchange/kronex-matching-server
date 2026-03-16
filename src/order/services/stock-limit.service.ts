@@ -41,7 +41,7 @@ export class StockLimitService {
                 })
             )?.open;
 
-        if (!prevClose) throw Error;
+        if (!prevClose) throw Error('전일 종가가 없습니다.');
         const upperRaw = Math.floor(Number(prevClose) * (1 + STOCK_LIMIT.UPPER_RATE));
         const lowerRaw = Math.ceil(Number(prevClose) * (1 - STOCK_LIMIT.LOWER_RATE));
 

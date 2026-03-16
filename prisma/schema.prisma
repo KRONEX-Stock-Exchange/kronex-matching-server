@@ -23,11 +23,23 @@ enum OrderStatus {
   c
 }
 
+enum Role {
+  ADMIN
+  USER
+}
+
+enum StockStatus {
+  LISTED
+  SUSPENDED
+  DELISTED
+}
+
 model User {
   id        Int      @id @default(autoincrement())
   username  String   @unique @db.VarChar(20)
   password  String   @db.VarChar(60)
   email     String   @unique @db.VarChar(50)
+  role      Role     @default(USER)
   createdAt DateTime @default(now()) @map("created_at")
 
   account       Account[]
@@ -62,11 +74,12 @@ model Account {
 }
 
 model Stock {
-  id        Int       @id @default(autoincrement())
-  name      String    @unique @db.VarChar(30)
+  id        Int         @id @default(autoincrement())
+  name      String      @unique @db.VarChar(30)
   price     BigInt
-  createdAt DateTime  @default(now()) @map("created_at")
-  brokenAt  DateTime? @map("broken_at")
+  status    StockStatus @default(LISTED)
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime?   @updatedAt
 
   userStocks   UserStock[]    @relation("UserStocksToStocks")
   order        Order[]
