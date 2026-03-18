@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
     Account,
     Order,
+    OrderMatch,
     OrderStatus,
     OrderType,
     Prisma,
@@ -97,7 +98,8 @@ export class OrderExecutionService {
         let totalExecutedAmount = 0n;
 
         let nextStockPrice: bigint;
-        let createMatchList = [];
+        let createMatchList: Prisma.OrderMatchCreateManyInput[] = [];
+        let matchedList: { price: number; number: number }[] = [];
 
         let updatedOrders: Order[] = [];
         updatedOrders.push(submitOrder);
@@ -171,6 +173,10 @@ export class OrderExecutionService {
                             findRemaining,
                         ),
                     );
+                    matchedList.push({
+                        price: Number(findOrder.price),
+                        number: Number(findRemaining),
+                    });
 
                     submitOrder.matchNumber = submitOrder.number;
                     nextStockPrice = findOrder.price;
@@ -207,6 +213,10 @@ export class OrderExecutionService {
                             findRemaining,
                         ),
                     );
+                    matchedList.push({
+                        price: Number(findOrder.price),
+                        number: Number(submitRemaining),
+                    });
 
                     submitOrder.matchNumber = submitOrder.number;
                     nextStockPrice = findOrder.price;
@@ -235,6 +245,11 @@ export class OrderExecutionService {
                             findRemaining,
                         ),
                     );
+                    matchedList.push({
+                        price: Number(findOrder.price),
+                        number: Number(findRemaining),
+                    });
+
                     nextStockPrice = findOrder.price;
                     totalExecutedAmount += executedAmount;
 
@@ -349,6 +364,11 @@ export class OrderExecutionService {
             nextStockPrice,
         );
 
-        return { updatedOrders, nextStockPrice };
+        // 체결 시간 반환
+        const [{ now: matchedAt }] = await tx.$queryRaw<[{ now: Date }]>`SELECT NOW() as now`;
+
+        // 거래량 계산
+        const volume = Number(createMatchList.reduce((sum, m) => sum + BigInt(m.number), 0n));
+        return { updatedOrders, nextStockPrice, matchedAt, volume, matchedList };
     }
 }
