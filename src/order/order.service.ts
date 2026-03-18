@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { Order, OrderStatus, OrderType, PrismaClient, TradingType } from '@prisma/client';
+import { Order, OrderStatus, OrderType, Prisma, PrismaClient, TradingType } from '@prisma/client';
 import { PrismaService } from 'src/common/prisma/prisma.service';
 import { OrderExecutionService } from './order-execution.service';
 import { OrderAction, OrderCreatedData } from './type/order-created-data.type';
@@ -32,7 +32,13 @@ export class OrderService {
 
     // 매수, 매도
     async trade(data: BuyOrder | SellOrder, tradingType: TradingType) {
-        let rs: { updatedOrders: Order[]; nextStockPrice: bigint };
+        let rs: {
+            updatedOrders: Order[];
+            nextStockPrice: bigint;
+            matchedAt: Date;
+            volume: number;
+            matchedList: { price: number; number: number }[];
+        };
 
         const account = await this.prismaService.account.findUnique({
             where: { accountNumber: data.accountNumber },
@@ -115,6 +121,9 @@ export class OrderService {
                 id: data.stockId,
                 nextPrice: Number(rs.nextStockPrice),
             },
+            matchedAt: rs.matchedAt,
+            volume: rs.volume,
+            matchedList: rs.matchedList,
             updatedOrders: orderSerializer(rs.updatedOrders),
         });
     }
@@ -122,15 +131,22 @@ export class OrderService {
     // 주문 정정
     // @TODO 에러처리 해야됨
     async edit(data: EditOrder) {
-        let rs: { updatedOrders: Order[]; nextStockPrice: bigint };
+        let rs: {
+            updatedOrders: Order[];
+            nextStockPrice: bigint;
+            matchedAt: Date;
+            volume: number;
+            matchedList: { price: number; number: number }[];
+        };
         let order: Order;
         let isAlreadyProcessed = false;
+        let prevOrderPrice = 0;
 
         await this.prismaService.$transaction(async (tx: PrismaClient) => {
             // 주문 락
             const [lockedOrder] = await tx.$queryRaw<Order[]>`
                 SELECT
-                    status
+                    status, price
                 FROM orders
                 WHERE id = ${data.orderId}
                 FOR UPDATE
@@ -169,6 +185,10 @@ export class OrderService {
                 id: order.stockId,
                 nextPrice: Number(rs.nextStockPrice),
             },
+            matchedAt: rs.matchedAt,
+            volume: rs.volume,
+            matchedList: rs.matchedList,
+            prevOrderPrice: prevOrderPrice,
             updatedOrders: orderSerializer(rs.updatedOrders),
         });
     }
@@ -177,7 +197,6 @@ export class OrderService {
     async cancel(data: CancelOrder) {
         let rs = {
             updatedOrders: [],
-            nextStockPrice: 0n,
         };
         let order: Order;
         let isAlreadyProcessed = false;
@@ -248,8 +267,11 @@ export class OrderService {
             type: 'cancel',
             stock: {
                 id: order.stockId,
-                nextPrice: Number(rs.nextStockPrice),
+                nextPrice: 0,
             },
+            volume: 0,
+            matchedAt: null,
+            matchedList: [],
             updatedOrders: orderSerializer(rs.updatedOrders),
         });
     }

@@ -79,7 +79,7 @@ model Stock {
   price     BigInt
   status    StockStatus @default(LISTED)
   createdAt DateTime    @default(now()) @map("created_at")
-  updatedAt DateTime?   @updatedAt
+  updatedAt DateTime?   @updatedAt @map("updated_at")
 
   userStocks   UserStock[]    @relation("UserStocksToStocks")
   order        Order[]
