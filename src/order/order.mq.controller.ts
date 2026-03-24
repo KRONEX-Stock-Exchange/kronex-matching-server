@@ -12,7 +12,12 @@ export class OrderMqController {
         const channel = context.getChannelRef();
         const originalMsg = context.getMessage();
 
-        await this.orderService.sendOrder(mqData);
-        channel.ack(originalMsg);
+        try {
+            await this.orderService.sendOrder(mqData);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            channel.ack(originalMsg);
+        }
     }
 }

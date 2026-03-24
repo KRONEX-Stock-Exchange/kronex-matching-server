@@ -62,8 +62,8 @@ model Account {
   id            Int      @id @default(autoincrement())
   userId        Int      @map("user_id")
   accountNumber Int      @unique @map("account_number")
-  money         BigInt
-  canMoney      BigInt   @map("can_money")
+  money         BigInt   @db.UnsignedBigInt
+  canMoney      BigInt   @map("can_money") @db.UnsignedBigInt
   createdAt     DateTime @default(now()) @map("created_at")
 
   userStocks UserStock[] @relation("UserStocksToAccounts")
@@ -76,7 +76,7 @@ model Account {
 model Stock {
   id        Int         @id @default(autoincrement())
   name      String      @unique @db.VarChar(30)
-  price     BigInt
+  price     BigInt      @db.UnsignedBigInt
   status    StockStatus @default(LISTED)
   createdAt DateTime    @default(now()) @map("created_at")
   updatedAt DateTime?   @updatedAt @map("updated_at")
@@ -92,12 +92,12 @@ model Stock {
 model StockHistory {
   stockId    Int      @map("stock_id")
   date       DateTime @db.Date
-  high       BigInt
-  low        BigInt
-  close      BigInt
-  open       BigInt?
-  upperLimit BigInt   @map("upper_limit")
-  lowerLimit BigInt   @map("lower_limit")
+  high       BigInt   @db.UnsignedBigInt
+  low        BigInt   @db.UnsignedBigInt
+  close      BigInt   @db.UnsignedBigInt
+  open       BigInt?  @db.UnsignedBigInt
+  upperLimit BigInt   @map("upper_limit") @db.UnsignedBigInt
+  lowerLimit BigInt   @map("lower_limit") @db.UnsignedBigInt
 
   stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
 
@@ -108,10 +108,10 @@ model StockHistory {
 model UserStock {
   accountId      Int    @map("account_id")
   stockId        Int    @map("stock_id")
-  number         BigInt
-  canNumber      BigInt @map("can_number")
-  average        BigInt
-  totalBuyAmount BigInt @map("total_buy_amount")
+  number         BigInt @db.UnsignedBigInt
+  canNumber      BigInt @map("can_number") @db.UnsignedBigInt
+  average        BigInt @db.UnsignedBigInt
+  totalBuyAmount BigInt @map("total_buy_amount") @db.UnsignedBigInt
 
   accounts Account @relation("UserStocksToAccounts", fields: [accountId], references: [id])
   stocks   Stock   @relation("UserStocksToStocks", fields: [stockId], references: [id])
@@ -124,9 +124,9 @@ model Order {
   id          Int          @id @default(autoincrement())
   accountId   Int          @map("account_id")
   stockId     Int          @map("stock_id")
-  price       BigInt
-  number      BigInt
-  matchNumber BigInt       @map("match_number")
+  price       BigInt       @db.UnsignedBigInt
+  number      BigInt       @db.UnsignedBigInt
+  matchNumber BigInt       @map("match_number") @db.UnsignedBigInt
   orderType   OrderType    @map("order_type")
   status      OrderStatus? @default(n)
   tradingType TradingType  @map("trading_type")
@@ -144,7 +144,7 @@ model Order {
 model OrderMatch {
   id             Int      @id @default(autoincrement())
   stockId        Int      @map("stock_id")
-  number         BigInt
+  number         BigInt   @db.UnsignedBigInt
   initialOrderId Int      @map("initial_order_id")
   orderId        Int      @map("order_id")
   matchedAt      DateTime @default(now()) @map("matched_at")

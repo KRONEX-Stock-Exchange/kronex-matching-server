@@ -76,39 +76,28 @@ export class OrderService {
                             BigInt((data as BuyOrder).lockedBalance),
                         );
                     } else {
-                        rs = await this.orderExecutionService.processSubmitOrder(tx, submitOrder);
+                        rs = await this.orderExecutionService.processSubmitOrder(
+                            tx,
+                            submitOrder,
+                        );
                     }
                 },
                 { timeout: 30000 },
             );
         } catch (err) {
-            console.error(err);
-            console.log(account);
+            const isDeadlock = err?.meta?.code === '1213' || err?.message?.includes('1213') || err?.code === 'P2034';
+            if (!isDeadlock) console.error(err);
 
             // 오류시 가능 수량 잠금 해제
             if (tradingType === TradingType.sell) {
                 await this.prismaService.userStock.update({
-                    where: {
-                        accountId_stockId: {
-                            accountId: account.id,
-                            stockId: data.stockId,
-                        },
-                    },
-                    data: {
-                        canNumber: { increment: data.number },
-                    },
+                    where: { accountId_stockId: { accountId: account.id, stockId: data.stockId } },
+                    data: { canNumber: { increment: data.number } },
                 });
             } else {
-                // 오류시 매수 가능 예수금 잠금 해제
                 await this.prismaService.account.update({
-                    where: {
-                        id: account.id,
-                    },
-                    data: {
-                        canMoney: {
-                            increment: (data as BuyOrder).lockedBalance,
-                        },
-                    },
+                    where: { id: account.id },
+                    data: { canMoney: { increment: (data as BuyOrder).lockedBalance } },
                 });
             }
 
@@ -142,35 +131,35 @@ export class OrderService {
         let isAlreadyProcessed = false;
         let prevOrderPrice = 0;
 
-        await this.prismaService.$transaction(async (tx: PrismaClient) => {
-            // 주문 락
-            const [lockedOrder] = await tx.$queryRaw<Order[]>`
-                SELECT
-                    status, price
-                FROM orders
-                WHERE id = ${data.orderId}
-                FOR UPDATE
-            `;
+        try {
+            await this.prismaService.$transaction(async (tx: PrismaClient) => {
+                // 주문 락
+                const [lockedOrder] = await tx.$queryRaw<Order[]>`
+                    SELECT status, price
+                    FROM orders
+                    WHERE id = ${data.orderId}
+                    FOR UPDATE
+                `;
 
-            // 중복 체결 방지
-            if (lockedOrder.status !== OrderStatus.n) {
-                isAlreadyProcessed = true;
-                return;
-            }
+                // 중복 체결 방지
+                if (lockedOrder.status !== OrderStatus.n) {
+                    isAlreadyProcessed = true;
+                    return;
+                }
 
-            order = await tx.order.update({
-                data: {
-                    price: data.price,
-                },
-                where: {
-                    id: data.orderId,
-                },
+                order = await tx.order.update({
+                    data: { price: data.price },
+                    where: { id: data.orderId },
+                });
+
+                const lockedBalance = (order.number - order.matchNumber) * order.price;
+
+                rs = await this.orderExecutionService.processSubmitOrder(tx, order, lockedBalance);
             });
-
-            const lockedBalance = (order.number - order.matchNumber) * order.price;
-
-            rs = await this.orderExecutionService.processSubmitOrder(tx, order, lockedBalance);
-        });
+        } catch (err) {
+            const isDeadlock = err?.meta?.code === '1213' || err?.message?.includes('1213') || err?.code === 'P2034';
+            if (!isDeadlock) console.error(err);
+        }
 
         if (isAlreadyProcessed) {
             return this.client.emit('order.error', {
@@ -201,60 +190,64 @@ export class OrderService {
         let order: Order;
         let isAlreadyProcessed = false;
 
-        await this.prismaService.$transaction(async (tx: PrismaClient) => {
-            // 주문 락
-            const [lockedOrder] = await tx.$queryRaw<Order[]>`
-                SELECT
-                    status
-                FROM orders
-                WHERE id = ${data.orderId}
-                FOR UPDATE
-            `;
+        try {
+            await this.prismaService.$transaction(async (tx: PrismaClient) => {
+                // 주문 락
+                const [lockedOrder] = await tx.$queryRaw<Order[]>`
+                    SELECT
+                        status
+                    FROM orders
+                    WHERE id = ${data.orderId}
+                    FOR UPDATE
+                `;
 
-            // 중복 체결 방지
-            if (lockedOrder.status !== OrderStatus.n) {
-                isAlreadyProcessed = true;
-                return;
-            }
+                // 중복 체결 방지
+                if (lockedOrder.status !== OrderStatus.n) {
+                    isAlreadyProcessed = true;
+                    return;
+                }
 
-            order = await tx.order.update({
-                data: {
-                    status: OrderStatus.c,
-                },
-                where: {
-                    id: data.orderId,
-                },
+                order = await tx.order.update({
+                    data: {
+                        status: OrderStatus.c,
+                    },
+                    where: {
+                        id: data.orderId,
+                    },
+                });
+                rs.updatedOrders.push(order);
+
+                // 매도 주문일 경우 가능수량 수정
+                if (order.tradingType == 'sell') {
+                    await tx.userStock.update({
+                        where: {
+                            accountId_stockId: {
+                                stockId: order.stockId,
+                                accountId: order.accountId,
+                            },
+                        },
+                        data: {
+                            canNumber: {
+                                increment: order.number - order.matchNumber,
+                            },
+                        },
+                    });
+                } else {
+                    await tx.account.update({
+                        where: {
+                            id: order.accountId,
+                        },
+                        data: {
+                            canMoney: {
+                                increment: (order.number - order.matchNumber) * order.price,
+                            },
+                        },
+                    });
+                }
             });
-            rs.updatedOrders.push(order);
-
-            // 매도 주문일 경우 가능수량 수정
-            if (order.tradingType == 'sell') {
-                await tx.userStock.update({
-                    where: {
-                        accountId_stockId: {
-                            stockId: order.stockId,
-                            accountId: order.accountId,
-                        },
-                    },
-                    data: {
-                        canNumber: {
-                            increment: order.number - order.matchNumber,
-                        },
-                    },
-                });
-            } else {
-                await tx.account.update({
-                    where: {
-                        id: order.accountId,
-                    },
-                    data: {
-                        canMoney: {
-                            increment: (order.number - order.matchNumber) * order.price,
-                        },
-                    },
-                });
-            }
-        });
+        } catch (err) {
+            console.error(err);
+        }
 
         if (isAlreadyProcessed) {
             return this.client.emit('order.error', {
