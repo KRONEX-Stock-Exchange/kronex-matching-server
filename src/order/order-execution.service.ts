@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
     Account,
     Order,
+    OrderMatch,
     OrderStatus,
     OrderType,
     Prisma,
@@ -97,13 +98,11 @@ export class OrderExecutionService {
         let totalExecutedAmount = 0n;
 
         let nextStockPrice: bigint;
-        let createMatchList = [];
+        let createMatchList: Prisma.OrderMatchCreateManyInput[] = [];
+        let matchedList: { price: number; number: number }[] = [];
 
-        let updatedOrders: { id: number; accountId: number }[] = [];
-        updatedOrders.push({
-            id: submitOrder.id,
-            accountId: submitOrder.accountId,
-        });
+        let updatedOrders: Order[] = [];
+        updatedOrders.push(submitOrder);
 
         // Update를 마지막에 한번만 하기 위해 정보를 메모리에 저장해두는 변수
         let userStockList: { update: number[] } = { update: [] }; // 업데이트 해야하는 accountId 저장
@@ -127,10 +126,7 @@ export class OrderExecutionService {
             let findOrder = await this.findOrder(tx, submitOrder, tradingType);
 
             if (findOrder) {
-                updatedOrders.push({
-                    id: findOrder.id,
-                    accountId: findOrder.accountId,
-                });
+                updatedOrders.push(findOrder);
 
                 // 찾은 주문 메모리에 저장
                 if (!userStocks.get(findOrder.accountId)) {
@@ -177,6 +173,10 @@ export class OrderExecutionService {
                             findRemaining,
                         ),
                     );
+                    matchedList.push({
+                        price: Number(findOrder.price),
+                        number: Number(findRemaining),
+                    });
 
                     submitOrder.matchNumber = submitOrder.number;
                     nextStockPrice = findOrder.price;
@@ -213,6 +213,10 @@ export class OrderExecutionService {
                             findRemaining,
                         ),
                     );
+                    matchedList.push({
+                        price: Number(findOrder.price),
+                        number: Number(submitRemaining),
+                    });
 
                     submitOrder.matchNumber = submitOrder.number;
                     nextStockPrice = findOrder.price;
@@ -241,6 +245,11 @@ export class OrderExecutionService {
                             findRemaining,
                         ),
                     );
+                    matchedList.push({
+                        price: Number(findOrder.price),
+                        number: Number(findRemaining),
+                    });
+
                     nextStockPrice = findOrder.price;
                     totalExecutedAmount += executedAmount;
 
@@ -302,6 +311,7 @@ export class OrderExecutionService {
                     }
                 } else if (
                     // 비싼 가격에 지정가 매수 주문을 한 경우 (부분 체결)
+                    submitOrder.matchNumber > 0n &&
                     submitOrder.number !== submitOrder.matchNumber &&
                     submitOrder.orderType == OrderType.limit &&
                     tradingType === TradingType.buy
@@ -354,6 +364,11 @@ export class OrderExecutionService {
             nextStockPrice,
         );
 
-        return updatedOrders;
+        // 체결 시간 반환
+        const [{ now: matchedAt }] = await tx.$queryRaw<[{ now: Date }]>`SELECT NOW() as now`;
+
+        // 거래량 계산
+        const volume = Number(createMatchList.reduce((sum, m) => sum + BigInt(m.number), 0n));
+        return { updatedOrders, nextStockPrice, matchedAt, volume, matchedList };
     }
 }
